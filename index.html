@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#101318">
+<title>Premier Chess</title>
+<style>
+:root{--bg:#101318;--panel:#1b222c;--gold:#e5b94f;--muted:#b6c0cc;--light:#eee5d5;--dark:#78916f}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:#fff;font-family:system-ui,-apple-system,Segoe UI,sans-serif}
+header{padding:16px 18px;border-bottom:1px solid #303946;display:flex;justify-content:space-between;align-items:center;gap:12px}
+h1{font-size:20px;letter-spacing:1.5px;color:var(--gold);margin:0}header small{color:var(--muted)}
+main{max-width:900px;margin:auto;padding:16px;display:grid;grid-template-columns:minmax(0,1.3fr) minmax(240px,.7fr);gap:16px}
+.card{background:var(--panel);border:1px solid #303946;border-radius:16px;padding:14px}
+.board-wrap{width:100%;max-width:620px;margin:auto;min-width:0}
+.board{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));grid-template-rows:repeat(8,minmax(0,1fr));width:100%;aspect-ratio:1/1;border:3px solid #303946;border-radius:7px;overflow:hidden;touch-action:manipulation}
+.square{width:100%;height:100%;min-width:0;min-height:0;overflow:hidden;border:0;border-radius:0;display:grid;place-items:center;padding:0;font-size:clamp(25px,7vw,54px);line-height:1;cursor:pointer;position:relative}
+.square.light{background:var(--light)}.square.dark{background:var(--dark)}
+.square.selected{outline:4px solid var(--gold);outline-offset:-4px}
+.square.target:after{content:"";width:24%;height:24%;border-radius:50%;background:#e5b94f99;position:absolute}
+.square.last{box-shadow:inset 0 0 0 4px #e5b94f88}
+.square span{filter:drop-shadow(0 1px 1px #0005);pointer-events:none}
+.controls{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+button,select{background:#2a3441;color:white;border:1px solid #455263;border-radius:10px;padding:10px 12px;font:inherit;max-width:100%}
+button.primary{background:var(--gold);color:#171717;border-color:var(--gold);font-weight:700}
+button:disabled{opacity:.45}
+h2{font-size:17px;margin:2px 0 12px;color:var(--gold)}
+.status{padding:12px;background:#111820;border-radius:10px;color:var(--muted);margin-bottom:12px;line-height:1.45}
+.moves{max-height:250px;overflow:auto;white-space:pre-wrap;font-family:ui-monospace,monospace;color:#e8edf2}
+.note{font-size:12px;color:var(--muted);line-height:1.5}
+input{width:100%;padding:10px;border-radius:9px;border:1px solid #455263;background:#111820;color:white;margin:6px 0}
+select{width:100%;margin:6px 0}
+@media(max-width:700px){main{grid-template-columns:minmax(0,1fr);padding:10px}.card{padding:10px}header{padding:12px}.square{font-size:clamp(27px,10vw,48px)}}
+</style>
+</head>
+<body>
+<header><div><h1>♟ PREMIER CHESS</h1><small>Redmi Pad SE • Web sürümü</small></div><small>v0.3 • Stockfish 19</small></header>
+<main>
+<section class="card">
+  <div class="status" id="status">Satranç tahtası hazırlanıyor…</div>
+  <div class="board-wrap"><div class="board" id="board" aria-label="Satranç tahtası"></div></div>
+  <div class="controls">
+    <button id="new" class="primary">Yeni oyun</button>
+    <button id="undo">Hamleyi geri al</button>
+    <button id="flip">Tahtayı çevir</button>
+  </div>
+</section>
+<aside class="card">
+  <h2>Maç bilgileri</h2>
+  <div id="turn">Sıra: Beyaz</div>
+  <p class="note">Taş seçmek için dokun, sonra gitmesini istediğin kareye dokun. Kurallara uygun hamleler kontrol edilir.</p>
+  <h2>Hamleler</h2><div class="moves" id="moves">Henüz hamle yok.</div>
+  <div class="controls"><button id="save">PGN indir</button><button id="copy">PGN kopyala</button></div>
+  <h2 style="margin-top:20px">Stockfish 19</h2>
+  <div class="status" id="engineStatus">Motor henüz başlatılmadı. İlk kullanımda yaklaşık 1,7 MB indirilir.</div>
+  <label class="note" for="playMode">Oyun modu</label>
+  <select id="playMode"><option value="human">İki kişi</option><option value="computer">Bilgisayara karşı</option></select>
+  <label class="note" for="engineColor">Bilgisayar hangi renkte oynasın?</label>
+  <select id="engineColor"><option value="b">Siyah</option><option value="w">Beyaz</option></select>
+  <div class="controls"><button id="analyze">Konumu analiz et</button><button id="stopEngine">Analizi durdur</button></div>
+  <div class="status" id="analysis">Analiz sonucu burada görünecek.</div>
+  <p class="note">Motor: Stockfish 19 Lite, tek iş parçacıklı WebAssembly sürümü. İnternet bağlantısı gerekir.</p>
+  <h2 style="margin-top:20px">Yerel kayıt</h2>
+  <input id="opponent" placeholder="Rakip adı (isteğe bağlı)">
+  <button id="archive" class="primary">Maçı cihazıma kaydet</button>
+  <div id="archives" class="note" style="margin-top:10px">Kayıtlı maç yok.</div>
+</aside>
+</main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+<script>
+(() => {
+ const boardEl=document.getElementById('board'), statusEl=document.getElementById('status');
+ if(typeof Chess==='undefined'){statusEl.textContent='Satranç kural kütüphanesi yüklenemedi. İnternet bağlantını kontrol et.';return;}
+ const game=new Chess();
+ const glyph={wk:'♔',wq:'♕',wr:'♖',wb:'♗',wn:'♘',wp:'♙',bk:'♚',bq:'♛',br:'♜',bb:'♝',bn:'♞',bp:'♟'};
+ let selected=null,targets=[],flipped=false,last=null,engine=null,engineReady=false,engineBusy=false,enginePurpose=null,analysisActive=false;
+ const files='abcdefgh';
+ const engineStatus=document.getElementById('engineStatus'), analysisEl=document.getElementById('analysis');
+ const modeEl=document.getElementById('playMode'), colorEl=document.getElementById('engineColor');
+ function render(){
+   boardEl.innerHTML='';
+   for(let ri=0;ri<8;ri++) for(let ci=0;ci<8;ci++){
+     const row=flipped?ri:7-ri, col=flipped?7-ci:ci, sq=files[col]+(row+1);
+     const piece=game.get(sq), el=document.createElement('button');
+     el.className='square '+(((row+col)%2===0)?'light':'dark');
+     if(sq===selected)el.classList.add('selected');
+     if(targets.includes(sq))el.classList.add('target');
+     if(last&&last.includes(sq))el.classList.add('last');
+     if(piece){const span=document.createElement('span');span.textContent=glyph[piece.color+piece.type];span.style.color=piece.color==='w'?'#fff':'#171b20';span.style.webkitTextStroke=piece.color==='w'?'1px #222':'1px #eee';el.appendChild(span);}
+     el.setAttribute('aria-label',sq);el.addEventListener('click',()=>tap(sq));boardEl.appendChild(el);
+   }
+   document.getElementById('turn').textContent='Sıra: '+(game.turn()==='w'?'Beyaz':'Siyah');
+   document.getElementById('moves').textContent=game.history().length?game.history().map((m,i)=>(i%2===0?Math.floor(i/2)+1+'. ':'')+m).join('  '):'Henüz hamle yok.';
+   if(game.in_checkmate())statusEl.textContent='Şah mat! '+(game.turn()==='w'?'Siyah':'Beyaz')+' kazandı.';
+   else if(game.in_draw())statusEl.textContent='Beraberlik.';
+   else statusEl.textContent=(game.turn()==='w'?'Beyaz':'Siyah')+' oynuyor'+(game.in_check()?' • ŞAH!':'');
+ }
+ function computerTurn(){return modeEl.value==='computer'&&game.turn()===colorEl.value&&!game.game_over();}
+ function tap(sq){
+   if(game.game_over()||computerTurn()||engineBusy)return;
+   if(selected){const move=game.move({from:selected,to:sq,promotion:'q'});if(move){last=[move.from,move.to];selected=null;targets=[];render();maybeComputerMove();return;}}
+   const p=game.get(sq);
+   if(p&&p.color===game.turn()){selected=sq;targets=game.moves({square:sq,verbose:true}).map(m=>m.to);}else{selected=null;targets=[];}
+   render();
+ }
+ function ensureEngine(){
+   if(engine)return;
+   engineStatus.textContent='Stockfish 19 yükleniyor… İlk açılışta internetten indirilir.';
+   try{
+     const base='https://cdn.jsdelivr.net/npm/stockfish@19.0.1/';
+     const workerCode='self.Module={locateFile:function(path){return "'+base+'"+path;}};importScripts("'+base+'stockfish-19-lite-single.js");';
+     const blob=new Blob([workerCode],{type:'text/javascript'});
+     const blobUrl=URL.createObjectURL(blob);
+     engine=new Worker(blobUrl);
+     engine.onmessage=(event)=>handleEngineMessage(String(event.data||''));
+     engine.onerror=(event)=>{engineStatus.textContent='Stockfish başlatılamadı. Chrome bu dosyanın Worker kullanımını engellemiş olabilir veya motor dosyası indirilememiş olabilir. Ayrıntı: '+(event.message||'bilinmiyor');engineBusy=false;};
+     engine.postMessage('uci');
+   }catch(e){engineStatus.textContent='Bu tarayıcı motoru başlatamadı.';}
+ }
+ function handleEngineMessage(line){
+   if(line==='uciok'){engine.postMessage('isready');return;}
+   if(line==='readyok'){engineReady=true;engineStatus.textContent='Stockfish 19 hazır!';if(computerTurn())requestComputerMove();return;}
+   if(line.startsWith('info ')){
+     const depth=line.match(/\bdepth (\d+)/), cp=line.match(/\bscore cp (-?\d+)/), mate=line.match(/\bscore mate (-?\d+)/);
+     if(analysisActive){let score='';if(cp)score=(Number(cp[1])/100).toFixed(2);if(mate)score='Mat '+mate[1];analysisEl.textContent='Derinlik: '+(depth?depth[1]:'—')+' • Değerlendirme: '+(score||'hesaplanıyor…');}
+   }
+   if(line.startsWith('bestmove ')){
+     const match=line.match(/^bestmove ([a-h][1-8])([a-h][1-8])([qrbn])?/);
+     if(enginePurpose==='play'&&match&&!game.game_over()){
+       const move=game.move({from:match[1],to:match[2],promotion:match[3]||'q'});
+       if(move){last=[move.from,move.to];selected=null;targets=[];render();}
+     }
+     if(enginePurpose==='analysis')analysisEl.textContent+=' • Analiz tamamlandı.';
+     engineBusy=false;enginePurpose=null;analysisActive=false;
+   }
+ }
+ function setPosition(){engine.postMessage('position fen '+game.fen());}
+ function requestComputerMove(){
+   if(!engineReady||engineBusy||!computerTurn())return;
+   engineBusy=true;enginePurpose='play';analysisActive=false;engineStatus.textContent='Stockfish düşünüyor…';
+   setPosition();engine.postMessage('go movetime 900');
+ }
+ function maybeComputerMove(){if(computerTurn()){ensureEngine();if(engineReady)requestComputerMove();}}
+ document.getElementById('new').onclick=()=>{game.reset();selected=null;targets=[];last=null;if(engine&&engineBusy)engine.postMessage('stop');engineBusy=false;enginePurpose=null;analysisActive=false;analysisEl.textContent='Yeni oyun hazır.';render();maybeComputerMove();};
+ document.getElementById('undo').onclick=()=>{if(engine&&engineBusy)engine.postMessage('stop');engineBusy=false;enginePurpose=null;analysisActive=false;game.undo();if(modeEl.value==='computer'&&game.history().length)game.undo();selected=null;targets=[];last=null;render();};
+ document.getElementById('flip').onclick=()=>{flipped=!flipped;render();};
+ modeEl.onchange=()=>{if(modeEl.value==='computer'){ensureEngine();maybeComputerMove();}else if(engine&&engineBusy){engine.postMessage('stop');engineBusy=false;enginePurpose=null;analysisActive=false;}};
+ colorEl.onchange=()=>{if(modeEl.value==='computer'){game.reset();selected=null;targets=[];last=null;render();ensureEngine();maybeComputerMove();}};
+ document.getElementById('analyze').onclick=()=>{ensureEngine();if(!engineReady){analysisEl.textContent='Motor hazırlanıyor; hazır olunca tekrar dokun.';return;}if(engineBusy)engine.postMessage('stop');engineBusy=true;enginePurpose='analysis';analysisActive=true;analysisEl.textContent='Konum analiz ediliyor…';setPosition();engine.postMessage('go depth 13');};
+ document.getElementById('stopEngine').onclick=()=>{if(engine&&engineBusy)engine.postMessage('stop');analysisActive=false;analysisEl.textContent='Motor durduruldu.';};
+ function pgn(){return game.pgn({max_width:72,newline_char:'\n'});}
+ document.getElementById('save').onclick=()=>{const blob=new Blob([pgn()],{type:'application/x-chess-pgn'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='premier-chess.pgn';a.click();URL.revokeObjectURL(a.href);};
+ document.getElementById('copy').onclick=async()=>{try{await navigator.clipboard.writeText(pgn());statusEl.textContent='PGN panoya kopyalandı.';}catch(e){statusEl.textContent='Panoya kopyalama desteklenmiyor; PGN indir düğmesini kullan.';}};
+ function getArchives(){try{return JSON.parse(localStorage.getItem('pc_archives')||'[]')}catch(e){return[]}}
+ function showArchives(){const a=getArchives();document.getElementById('archives').textContent=a.length?a.map((x,i)=>(i+1)+'. '+x.opponent+' — '+x.date).join('\n'):'Kayıtlı maç yok.'}
+ document.getElementById('archive').onclick=()=>{const a=getArchives();a.push({opponent:document.getElementById('opponent').value||'Rakip belirtilmedi',date:new Date().toLocaleDateString('tr-TR'),pgn:pgn()});localStorage.setItem('pc_archives',JSON.stringify(a));showArchives();statusEl.textContent='Maç bu tarayıcıya kaydedildi.';};
+ showArchives();render();
+})();
+</script>
+</body></html>
